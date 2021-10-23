@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { throttleTime, debounceTime, tap } from 'rxjs/operators';
 import { RtdbViewerStore } from './rtdb-viewer.store';
+import { DatabaseReference } from '@firebase/database';
 
 @Component({
   selector: 'rtdb-viewer',
@@ -21,12 +22,13 @@ import { RtdbViewerStore } from './rtdb-viewer.store';
         [@.disabled]="isScrolling"
         [@rtdbAddRemove]
       >
+        {{ item }}
       </div>
   `,
   animations: [
     trigger('rtdbAddRemove', [
-      transition(':enter', [query('@*', animateChild())]),
-      transition(':leave', [query('@*', animateChild())]),
+      // transition(':enter', [query('@*', animateChild())]),
+      // transition(':leave', [query('@*', animateChild())]),
     ]),
   ],
   styles: [
@@ -47,7 +49,9 @@ export class RtdbViewerComponent {
   isScrolling = false;
 
   @Input()
-  set ref(ref: {}) {}
+  set ref(ref: DatabaseReference|undefined) {
+    this.store.setRootRef(ref);
+  }
 
   @ViewChild(CdkVirtualForOf, { static: true })
   private readonly virtualForOf?: CdkVirtualForOf<{}>;
