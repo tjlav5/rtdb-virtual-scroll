@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getDatabase, ref } from 'firebase/database';
 
 @Component({
-  selector: 'demo-app',
+  selector: 'app-root',
   template: '<rtdb-viewer [ref]="ref"></rtdb-viewer>',
   styles: [
     `
