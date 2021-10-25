@@ -9,7 +9,7 @@ import {
   Input,
 } from '@angular/core';
 import { throttleTime, debounceTime, tap } from 'rxjs/operators';
-import { RtdbViewerStore } from './rtdb-viewer.store';
+import { FlatSnapshot, RtdbViewerStore } from './rtdb-viewer.store';
 import { DatabaseReference } from '@firebase/database';
 
 @Component({
@@ -17,12 +17,11 @@ import { DatabaseReference } from '@firebase/database';
   template: `
     <cdk-virtual-scroll-viewport itemSize="50">
       <div
-        *cdkVirtualFor="let item of store; trackBy: trackByItem; templateCacheSize: 0"
-        class="example-item"
+        *cdkVirtualFor="let item of store; trackBy: trackByFlatSnapshot; templateCacheSize: 0"
         [@.disabled]="isScrolling"
         [@rtdbAddRemove]
       >
-        {{ item }}
+        <div style="height: 50px">{{ item | json }}</div>
       </div>
   `,
   animations: [
@@ -77,7 +76,7 @@ export class RtdbViewerComponent {
       });
   }
 
-  trackByItem(index: number) {
-    return index;
+  trackByFlatSnapshot(index: number, flatSnapshot: FlatSnapshot) {
+    return flatSnapshot[0].toString();
   }
 }

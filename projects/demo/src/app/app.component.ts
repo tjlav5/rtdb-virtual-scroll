@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { initializeApp } from 'firebase/app';
-import { getDatabase, ref } from 'firebase/database';
+import {  DatabaseReference, getDatabase, ref } from 'firebase/database';
 
 @Component({
   selector: 'app-root',
@@ -15,7 +15,7 @@ import { getDatabase, ref } from 'firebase/database';
   ],
 })
 export class AppComponent {
-  readonly ref: {};
+  readonly ref: DatabaseReference;
 
   constructor() {
     const firebaseConfig = {
