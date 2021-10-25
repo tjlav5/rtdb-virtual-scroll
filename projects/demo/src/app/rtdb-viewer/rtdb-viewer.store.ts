@@ -44,14 +44,18 @@ export class RtdbViewerStore
       concatMap((ref) => object(ref)),
       map(({ snapshot }) => {
         console.log({ data: snapshot.val() });
+        const t0 = performance.now();
         const flatSnapshot = flattenSnapshot(snapshot);
-        console.log({ flatSnapshot: flatSnapshot })
+        const t1 = performance.now();
+        console.log({ flatSnapshot: flatSnapshot, time: t1 - t0 })
         return flatSnapshot;
       }),
       catchError((err, caught) => {
         console.error(err);
+        // TODO - fallback to Rest API
         return caught;
-      })
+      }),
+      // map to UI node(s) + insert editor formControls OR save-sentinels
     );
   }
 
