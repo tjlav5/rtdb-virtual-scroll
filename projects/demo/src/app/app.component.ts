@@ -9,7 +9,6 @@ import {  DatabaseReference, getDatabase, ref } from 'firebase/database';
     `
       rtdb-viewer {
         height: 600px;
-        border: 1px solid black;
       }
     `,
   ],

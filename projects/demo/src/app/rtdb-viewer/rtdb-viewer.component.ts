@@ -8,14 +8,18 @@ import {
   ViewChild,
   Input,
 } from '@angular/core';
-import { throttleTime, debounceTime, tap } from 'rxjs/operators';
+import { throttleTime, debounceTime, tap, map } from 'rxjs/operators';
 import { FlatSnapshot, RtdbViewerStore } from './rtdb-viewer.store';
 import { DatabaseReference } from '@firebase/database';
+import { FormControl } from '@angular/forms';
+import { combineLatest, ReplaySubject } from 'rxjs';
 
 @Component({
   selector: 'rtdb-viewer',
   template: `
-    <cdk-virtual-scroll-viewport itemSize="50">
+    <input [formControl]="query" placeholder="Ctrl-f" />
+    <button *ngIf="nextIndex$ | async as index" (click)="viewport.scrollToIndex(index)">Next</button>
+    <cdk-virtual-scroll-viewport itemSize="50" #viewport (scrolledIndexChange)="onIndexChanged($event)">
       <div
         *cdkVirtualFor="let item of store; trackBy: trackByFlatSnapshot; templateCacheSize: 0"
         [@.disabled]="isScrolling"
@@ -37,6 +41,7 @@ import { DatabaseReference } from '@firebase/database';
       }
 
       cdk-virtual-scroll-viewport {
+        border: 1px solid black;
         height: 100%;
       }
     `,
@@ -48,17 +53,33 @@ export class RtdbViewerComponent {
   isScrolling = false;
 
   @Input()
-  set ref(ref: DatabaseReference|undefined) {
+  set ref(ref: DatabaseReference | undefined) {
     this.store.setRootRef(ref);
   }
 
   @ViewChild(CdkVirtualForOf, { static: true })
   private readonly virtualForOf?: CdkVirtualForOf<{}>;
 
+  readonly query = new FormControl('');
+
+  private readonly scrolledIndex$ = new ReplaySubject<number>(1);
+
+  readonly nextIndex$ = combineLatest([this.store.queryResults$, this.scrolledIndex$]).pipe(map(([results, scrolledIndex]) => {
+    for (const index of results) {
+      if (index > scrolledIndex) {
+        return index;
+      }
+    }
+  }));
+
   constructor(
     readonly store: RtdbViewerStore,
     private readonly cdr: ChangeDetectorRef
-  ) {}
+  ) {
+    this.query.valueChanges.subscribe((v) => {
+      store.setQuery(v);
+    });
+  }
 
   ngOnInit() {
     this.virtualForOf.viewChange
@@ -74,6 +95,10 @@ export class RtdbViewerComponent {
         this.isScrolling = false;
         this.cdr.markForCheck();
       });
+  }
+
+  onIndexChanged(index: number) {
+    this.scrolledIndex$.next(index);
   }
 
   trackByFlatSnapshot(index: number, flatSnapshot: FlatSnapshot) {
