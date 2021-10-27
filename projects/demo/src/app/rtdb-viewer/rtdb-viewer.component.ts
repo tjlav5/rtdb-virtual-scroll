@@ -9,7 +9,7 @@ import {
   Input,
 } from '@angular/core';
 import { throttleTime, debounceTime, tap, map } from 'rxjs/operators';
-import { FlatSnapshot, RtdbViewerStore } from './rtdb-viewer.store';
+import { FlatSnapshot, RtdbNode, RtdbViewerStore } from './rtdb-viewer.store';
 import { DatabaseReference } from '@firebase/database';
 import { FormControl } from '@angular/forms';
 import { combineLatest, ReplaySubject } from 'rxjs';
@@ -21,11 +21,18 @@ import { combineLatest, ReplaySubject } from 'rxjs';
     <button *ngIf="nextIndex$ | async as index" (click)="viewport.scrollToIndex(index)">Next</button>
     <cdk-virtual-scroll-viewport itemSize="50" #viewport (scrolledIndexChange)="onIndexChanged($event)">
       <div
-        *cdkVirtualFor="let item of store; trackBy: trackByFlatSnapshot; templateCacheSize: 0"
+        *cdkVirtualFor="let item of store; trackBy: trackByRtdbNode; templateCacheSize: 0"
         [@.disabled]="isScrolling"
         [@rtdbAddRemove]
       >
-        <div style="height: 50px">{{ item | json }}</div>
+        <button (click)="store.collapseNode(item.ref)">X</button>
+        <button (click)="store.expandNode(item.ref)">+</button>
+        <rtdb-realtime-node [ref]="item.ref" [value]="item.value"></rtdb-realtime-node>
+        <!--
+          rest-node
+          editor-node
+          save-node
+        -->
       </div>
   `,
   animations: [
@@ -43,6 +50,16 @@ import { combineLatest, ReplaySubject } from 'rxjs';
       cdk-virtual-scroll-viewport {
         border: 1px solid black;
         height: 100%;
+      }
+
+      div {
+        display: grid;
+        grid-template-columns: min-content min-content 1fr;
+        place-items: baseline;
+      }
+
+      rtdb-realtime-node {
+        height: 50px;
       }
     `,
   ],
@@ -101,7 +118,7 @@ export class RtdbViewerComponent {
     this.scrolledIndex$.next(index);
   }
 
-  trackByFlatSnapshot(index: number, flatSnapshot: FlatSnapshot) {
-    return flatSnapshot[0].toString();
+  trackByRtdbNode(index: number, node: RtdbNode) {
+    return node.ref.toString();
   }
 }
