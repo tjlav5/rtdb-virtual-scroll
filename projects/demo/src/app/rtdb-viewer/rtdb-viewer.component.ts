@@ -22,6 +22,7 @@ import { combineLatest, ReplaySubject } from 'rxjs';
     <cdk-virtual-scroll-viewport itemSize="50" #viewport (scrolledIndexChange)="onIndexChanged($event)">
       <div
         *cdkVirtualFor="let item of store; trackBy: trackByRtdbNode; templateCacheSize: 0"
+        [style.--level]="item.level"
         [@.disabled]="isScrolling"
         [@rtdbAddRemove]
       >
@@ -55,6 +56,7 @@ import { combineLatest, ReplaySubject } from 'rxjs';
       div {
         display: grid;
         grid-template-columns: min-content min-content 1fr;
+        margin-left: calc(24px * var(--level));
         place-items: baseline;
       }
 

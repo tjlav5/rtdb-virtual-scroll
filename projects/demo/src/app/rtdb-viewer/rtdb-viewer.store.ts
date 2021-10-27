@@ -30,6 +30,7 @@ export type FlatSnapshot = [DatabaseReference, JsonPrimitive];
 export interface RtdbNode {
   ref: DatabaseReference;
   value?: JsonPrimitive;
+  level: number;
 }
 
 @Injectable()
@@ -55,14 +56,14 @@ export class RtdbViewerStore
     ...state,
     query,
   }));
-  
+
   readonly expandNode = this.updater((state, ref: DatabaseReference) => {
     const collapsedRefs = new Set(state.collapsedRefs);
     collapsedRefs.delete(ref.toString());
 
     return {
-    ...state,
-    collapsedRefs,
+      ...state,
+      collapsedRefs,
     };
   });
 
@@ -71,28 +72,27 @@ export class RtdbViewerStore
     collapsedRefs: new Set([...state.collapsedRefs, ref.toString()]),
   }));
 
-  private readonly flatSnapshot$ = 
-  combineLatest([this.rootRef$, this.collapsedRefs$]).pipe(
-    switchMap(([ref, collapsedRefs]) => {
-      return object(ref).pipe(
-        map(({ snapshot }) => {
-          console.log(ref, collapsedRefs);
-          console.log({ data: snapshot.val() });
-          const t0 = performance.now();
-          const flatSnapshot = flattenSnapshot(snapshot, collapsedRefs);
-          const t1 = performance.now();
-          console.log({ flatSnapshot: flatSnapshot, time: t1 - t0 })
-          return flatSnapshot;
-        }));
-    }),
-    catchError((err, caught) => {
-      console.error(err);
-      // TODO - fallback to Rest API
-      return caught;
-    }),
-    // map to UI node(s) + insert editor formControls OR save-sentinels
-    shareReplay({ bufferSize: 1, refCount: true }),
-  );
+  private readonly flatSnapshot$ =
+    combineLatest([this.rootRef$, this.collapsedRefs$]).pipe(
+      switchMap(([ref, collapsedRefs]) => {
+        return object(ref).pipe(
+          map(({ snapshot }) => {
+            console.log({ ref, collapsedRefs, data: snapshot.val() });
+            const t0 = performance.now();
+            const flatSnapshot = flattenSnapshot(snapshot, collapsedRefs);
+            const t1 = performance.now();
+            console.log({ flatSnapshot: flatSnapshot, time: t1 - t0 })
+            return flatSnapshot;
+          }));
+      }),
+      catchError((err, caught) => {
+        console.error(err);
+        // TODO - fallback to Rest API
+        return caught;
+      }),
+      // map to UI node(s) + insert editor formControls OR save-sentinels
+      shareReplay({ bufferSize: 1, refCount: true }),
+    );
 
   readonly queryResults$ = combineLatest([this.flatSnapshot$, this.query$]).pipe(
     map(([flatSnapshot, query]) => {
@@ -116,15 +116,20 @@ export class RtdbViewerStore
   );
 
   connect() {
-    return this.flatSnapshot$.pipe(
-      map(flatSnapshot => {
+    return combineLatest([this.rootRef$, this.flatSnapshot$]).pipe(
+      map(([rootRef, flatSnapshot]) => {
+        const t0 = performance.now();
         const rtdbNodes: RtdbNode[] = [];
+        const rootRefLength = rootRef.toString().split('/').length;
         for (const [ref, value] of flatSnapshot) {
           rtdbNodes.push({
             ref,
             value,
+            level: ref.isEqual(rootRef) ? 0 : ref.toString().split('/').length - rootRefLength + 1,
           });
         }
+        const t1 = performance.now();
+        console.log({ rtdbNodes, time: t1 - t0 });
         return rtdbNodes;
       }),
     );
@@ -141,8 +146,6 @@ function flattenSnapshot(snapshot: DataSnapshot, collapsedRefs: Set<string>): Fl
       snapshot.forEach(s => {
         children.push(flattenSnapshot(s, collapsedRefs));
       });
-    } else {
-      console.log(`flatten ${snapshot.ref}`);
     }
 
     return [[snapshot.ref, null], ...children.flat()];
