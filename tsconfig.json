@@ -18,7 +18,9 @@
       "es2018",
       "es2019",
       "dom"
-    ]
+    ],
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true
   },
   "angularCompilerOptions": {
     "enableIvy": true,

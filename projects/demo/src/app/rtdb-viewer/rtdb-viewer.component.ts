@@ -9,10 +9,11 @@ import {
   Input,
 } from '@angular/core';
 import { throttleTime, debounceTime, tap, map } from 'rxjs/operators';
-import { FlatSnapshot, RtdbNode, RtdbViewerStore } from './rtdb-viewer.store';
+import { FlatSnapshot, NodeType, RtdbNode, RtdbViewerStore } from './rtdb-viewer.store';
 import { DatabaseReference } from '@firebase/database';
 import { FormControl } from '@angular/forms';
 import { combineLatest, ReplaySubject } from 'rxjs';
+import { createNgModuleType } from '@angular/compiler/src/render3/r3_module_compiler';
 
 @Component({
   selector: 'rtdb-viewer',
@@ -28,12 +29,11 @@ import { combineLatest, ReplaySubject } from 'rxjs';
       >
         <button (click)="store.collapseNode(item.ref)">X</button>
         <button (click)="store.expandNode(item.ref)">+</button>
-        <rtdb-realtime-node [ref]="item.ref" [value]="item.value"></rtdb-realtime-node>
-        <!--
-          rest-node
-          editor-node
-          save-node
-        -->
+        <ng-container [ngSwitch]="item.type">
+          <rtdb-realtime-node *ngSwitchCase="NodeType.REALTIME" [ref]="item.ref" [value]="item.value"></rtdb-realtime-node>
+          <rtdb-editor-node *ngSwitchCase="NodeType.EDITOR" [ref]="item.ref"></rtdb-editor-node>
+          <rtdb-save-node *ngSwitchCase="NodeType.SAVE" [ref]="item.ref"></rtdb-save-node>
+        </ng-container>
       </div>
   `,
   animations: [
@@ -60,7 +60,9 @@ import { combineLatest, ReplaySubject } from 'rxjs';
         place-items: baseline;
       }
 
-      rtdb-realtime-node {
+      rtdb-realtime-node,
+      rtdb-editor-node,
+      rtdb-save-node {
         height: 50px;
       }
     `,
@@ -69,6 +71,8 @@ import { combineLatest, ReplaySubject } from 'rxjs';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RtdbViewerComponent {
+  readonly NodeType = NodeType;
+
   isScrolling = false;
 
   @Input()
@@ -101,7 +105,7 @@ export class RtdbViewerComponent {
   }
 
   ngOnInit() {
-    this.virtualForOf.viewChange
+    this.virtualForOf?.viewChange
       .pipe(
         throttleTime(10),
         tap(() => {
