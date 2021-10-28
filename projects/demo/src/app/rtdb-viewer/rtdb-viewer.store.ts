@@ -5,13 +5,13 @@ import { ComponentStore } from '@ngrx/component-store';
 import { combineLatest, EMPTY, of } from 'rxjs';
 import { catchError, concatMap, map, shareReplay, switchMap, tap } from 'rxjs/operators';
 import { object } from 'rxfire/database';
-import { FormControl } from '@angular/forms';
+import { AbstractControl, FormArray, FormControl, FormGroup } from '@angular/forms';
 
 interface State {
   rootRef: DatabaseReference | undefined;
   query: string | undefined;
   collapsedRefs: Set<string>;
-  childEditors: Record<string, FormControl[]>;
+  childEditors: Record<string, FormArray>;
 }
 
 const INITIAL_STATE: State = {
@@ -51,6 +51,7 @@ interface EditorNode {
 
 interface SaveNode {
   type: NodeType.SAVE;
+  formControl: FormArray;
   isExpandable: false;
 }
 
@@ -59,7 +60,7 @@ interface RestNode {
   isExpandable: boolean;
 }
 
-export type RtdbNode = { type: NodeType, ref: DatabaseReference, level: number,} & (RealtimeNode | EditorNode | SaveNode | RestNode);
+export type RtdbNode = { type: NodeType, ref: DatabaseReference, level: number, } & (RealtimeNode | EditorNode | SaveNode | RestNode);
 
 
 @Injectable()
@@ -105,12 +106,33 @@ export class RtdbViewerStore
 
   readonly addChildEditor = this.updater((state, ref: DatabaseReference) => {
     const refURL = ref.toString();
+    const editors = state.childEditors[refURL] ?? new FormArray([]);
+    editors.push(new FormControl());
 
     return {
       ...state,
       childEditors: {
         ...state.childEditors,
-        [refURL]: [...state.childEditors[refURL] ?? [], new FormControl(null),]
+        [refURL]: editors,
+      },
+    };
+  });
+
+  readonly removeChildEditor = this.updater((state, { ref, control }: { ref: DatabaseReference, control: FormControl }) => {
+    const refURL = ref.toString();
+    const editors = state.childEditors[refURL];
+
+    if (!editors) {
+      return state;
+    }
+
+    editors.removeAt(0);
+
+    return {
+      ...state,
+      childEditors: {
+        ...state.childEditors,
+        [refURL]: editors,
       },
     };
   });
@@ -203,7 +225,7 @@ export class RtdbViewerStore
 interface WalkTree {
   snapshot: DataSnapshot;
   collapsedRefs: Set<string>;
-  childEditors: Record<string, FormControl[]>;
+  childEditors: Record<string, FormArray>;
   level?: number;
 }
 
@@ -221,7 +243,7 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
 
     const editors = childEditors[refUrl];
     if (editors?.length) {
-      for (const editor of editors) {
+      for (const editor of walkAbstractControl({ control: editors })) {
         yield {
           type: NodeType.EDITOR,
           ref: snapshot.ref,
@@ -236,6 +258,7 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
         ref: snapshot.ref,
         level: level + 1,
         isExpandable: false,
+        formControl: editors,
       };
     }
 
@@ -256,6 +279,30 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
       level: level,
       isExpandable: false,
     }
+  }
+}
+
+interface WalkAbstractControl {
+  control: AbstractControl;
+}
+
+function isArrayGroup(control: AbstractControl): control is FormArray {
+  return control.hasOwnProperty('controls') && Array.isArray(control.value);
+}
+
+function isFormControl(control: AbstractControl): control is FormControl {
+  return !control.hasOwnProperty('controls');
+}
+
+function* walkAbstractControl({ control }: WalkAbstractControl): Generator<FormControl, void, void> {
+  if (isArrayGroup(control)) {
+    for (const c of control.controls) {
+      yield* walkAbstractControl({ control: c });
+    }
+  } else if (isFormControl(control)) {
+    yield control;
+  } else {
+    throw new Error(`walk abstract control does not support FormGroup: ${control}`);
   }
 }
 
