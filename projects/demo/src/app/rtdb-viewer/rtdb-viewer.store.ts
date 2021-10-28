@@ -40,22 +40,26 @@ export enum NodeType {
 interface RealtimeNode {
   type: NodeType.REALTIME;
   value: JsonPrimitive;
+  isExpandable: boolean;
 }
 
 interface EditorNode {
   type: NodeType.EDITOR;
   formControl: FormControl;
+  isExpandable: false;
 }
 
 interface SaveNode {
   type: NodeType.SAVE;
+  isExpandable: false;
 }
 
 interface RestNode {
   type: NodeType.REST;
+  isExpandable: boolean;
 }
 
-export type RtdbNode = { type: NodeType, ref: DatabaseReference, level: number, } & (RealtimeNode | EditorNode | SaveNode | RestNode);
+export type RtdbNode = { type: NodeType, ref: DatabaseReference, level: number,} & (RealtimeNode | EditorNode | SaveNode | RestNode);
 
 
 @Injectable()
@@ -212,6 +216,7 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
       ref: snapshot.ref,
       value: null,
       level,
+      isExpandable: true,
     }
 
     const editors = childEditors[refUrl];
@@ -222,6 +227,7 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
           ref: snapshot.ref,
           formControl: editor,
           level: level + 1,
+          isExpandable: false,
         };
       }
 
@@ -229,6 +235,7 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
         type: NodeType.SAVE,
         ref: snapshot.ref,
         level: level + 1,
+        isExpandable: false,
       };
     }
 
@@ -247,6 +254,7 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
       ref: snapshot.ref,
       value: snapshot.val(),
       level: level,
+      isExpandable: false,
     }
   }
 }

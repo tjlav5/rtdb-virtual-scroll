@@ -8,12 +8,56 @@ import {
   ViewChild,
   Input,
 } from '@angular/core';
-import { throttleTime, debounceTime, tap, map } from 'rxjs/operators';
+import { throttleTime, debounceTime, tap, map, switchMap } from 'rxjs/operators';
 import { FlatSnapshot, NodeType, RtdbNode, RtdbViewerStore } from './rtdb-viewer.store';
 import { DatabaseReference } from '@firebase/database';
 import { FormControl } from '@angular/forms';
-import { combineLatest, ReplaySubject } from 'rxjs';
-import { createNgModuleType } from '@angular/compiler/src/render3/r3_module_compiler';
+import { combineLatest, Observable, of, ReplaySubject } from 'rxjs';
+
+interface Toggle {
+  expanded: boolean;
+  ref: DatabaseReference; 
+}
+
+@Component({
+  selector: 'rtdb-viewer-toggle',
+  template: `
+    <ng-container *ngIf="toggle$ | async as toggle">
+      <button *ngIf="toggle" (click)="toggle.expanded ? store.collapseNode(toggle.ref) : store.expandNode(toggle.ref)">
+        <ng-container *ngIf="toggle.expanded; else collapsed">X</ng-container>
+        <ng-template #collapsed>+</ng-template>
+      </button>
+    </ng-container>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class RtdbViewerToggleComponent {
+  @Input()
+  set canToggle(canToggle: boolean) {
+    this.canToggle$.next(canToggle);
+  }
+  private readonly canToggle$ = new ReplaySubject<boolean>(1);
+
+  @Input()
+  set ref(ref: DatabaseReference) {
+    this.ref$.next(ref);
+  }
+  private readonly ref$ = new ReplaySubject<DatabaseReference>(1);
+
+  readonly toggle$: Observable<Toggle|null> = combineLatest([this.canToggle$, this.ref$]).pipe(
+    switchMap(([canToggle, ref]) => {
+      if (!canToggle) {
+        return of(null);
+      } else {
+        return this.store.collapsedRefs$.pipe(map(collapsedRefs => {
+          return collapsedRefs.has(ref.toString()) ? {expanded: false, ref} : {expanded: true, ref};
+        }));
+      }
+    }),
+  );
+
+  constructor(readonly store: RtdbViewerStore) { }
+}
 
 @Component({
   selector: 'rtdb-viewer',
@@ -27,8 +71,8 @@ import { createNgModuleType } from '@angular/compiler/src/render3/r3_module_comp
         [@.disabled]="isScrolling"
         [@rtdbAddRemove]
       >
-        <button (click)="store.collapseNode(item.ref)">X</button>
-        <button (click)="store.expandNode(item.ref)">+</button>
+        <rtdb-viewer-toggle [canToggle]="item.isExpandable" [ref]="item.ref"></rtdb-viewer-toggle>
+
         <ng-container [ngSwitch]="item.type">
           <rtdb-realtime-node *ngSwitchCase="NodeType.REALTIME" [ref]="item.ref" [value]="item.value"></rtdb-realtime-node>
           <rtdb-editor-node *ngSwitchCase="NodeType.EDITOR" [ref]="item.ref"></rtdb-editor-node>
@@ -55,7 +99,7 @@ import { createNgModuleType } from '@angular/compiler/src/render3/r3_module_comp
 
       div {
         display: grid;
-        grid-template-columns: min-content min-content 1fr;
+        grid-template-columns: min-content 1fr;
         margin-left: calc(24px * var(--level));
         place-items: baseline;
       }
