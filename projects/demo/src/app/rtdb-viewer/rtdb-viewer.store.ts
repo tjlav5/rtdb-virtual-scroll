@@ -65,6 +65,12 @@ interface RestNode {
 
 export type RtdbNode = { type: NodeType, ref: DatabaseReference, level: number, } & (RealtimeNode | EditorNode | SaveNode | RestNode);
 
+let walkAbstractControlPerformance = 0;
+let retToStringPerfomance = 0;
+let childrenForEachPerformance = 0;
+let childrenWalkTreePerformance = 0;
+let snapshotValPerformance = 0;
+
 
 @Injectable()
 export class RtdbViewerStore
@@ -274,7 +280,6 @@ interface WalkTree {
 }
 
 function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTree): Generator<RtdbNode, void, void> {
-  const refUrl = snapshot.ref.toString();
 
   if (snapshot.hasChildren()) {
     yield {
@@ -284,6 +289,8 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
       level,
       isExpandable: true,
     }
+
+    const refUrl = snapshot.ref.toString();
 
     const editors = childEditors[refUrl];
     if (editors?.length) {
