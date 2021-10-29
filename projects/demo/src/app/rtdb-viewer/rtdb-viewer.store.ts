@@ -5,7 +5,8 @@ import { ComponentStore } from '@ngrx/component-store';
 import { combineLatest, EMPTY, of } from 'rxjs';
 import { catchError, concatMap, map, shareReplay, switchMap, tap } from 'rxjs/operators';
 import { object } from 'rxfire/database';
-import { AbstractControl, FormArray, FormControl, FormGroup } from '@angular/forms';
+import { AbstractControl, FormArray, FormControl, FormGroup, NgControlStatus } from '@angular/forms';
+import { assert } from '@firebase/util';
 
 interface State {
   rootRef: DatabaseReference | undefined;
@@ -45,8 +46,10 @@ interface RealtimeNode {
 
 interface EditorNode {
   type: NodeType.EDITOR;
-  formControl: FormControl;
   isExpandable: false;
+  keyControl: FormControl;
+  valueControl?: FormControl;
+  path: number[];
 }
 
 interface SaveNode {
@@ -104,10 +107,29 @@ export class RtdbViewerStore
     collapsedRefs: new Set([...state.collapsedRefs, ref.toString()]),
   }));
 
-  readonly addChildEditor = this.updater((state, ref: DatabaseReference) => {
+  readonly addChildEditor = this.updater((state, { ref, path = [] }: { ref: DatabaseReference, path?: number[] }) => {
     const refURL = ref.toString();
-    const editors = state.childEditors[refURL] ?? new FormArray([]);
-    editors.push(new FormControl());
+    let editors = state.childEditors[refURL] ?? new FormArray([]);
+
+    console.log({ editors });
+
+    let foo: FormArray = editors;
+    for (const index of path) {
+      const temp = foo.at(index);
+      if (isFormArray(temp)) {
+        foo = temp;
+      } else if (isFormGroup(temp)) {
+        // ensure the value is null
+        castFormControl(temp.get('value')).setValue(null);
+        foo = castFormArray(temp.get('children'));
+      }
+    }
+
+    foo.push(new FormGroup({
+      key: new FormControl(''),
+      value: new FormControl(''),
+      children: new FormArray([]),
+    }));
 
     return {
       ...state,
@@ -118,7 +140,7 @@ export class RtdbViewerStore
     };
   });
 
-  readonly removeChildEditor = this.updater((state, { ref, control }: { ref: DatabaseReference, control: FormControl }) => {
+  readonly removeChildEditor = this.updater((state, { ref, path }: { ref: DatabaseReference, path: number[] }) => {
     const refURL = ref.toString();
     const editors = state.childEditors[refURL];
 
@@ -126,7 +148,29 @@ export class RtdbViewerStore
       return state;
     }
 
-    editors.removeAt(0);
+    const key = path.pop();
+    if (key === undefined) {
+      return state;
+    }
+
+    let editor: AbstractControl = editors;
+    for (const i of path) {
+      if (isFormArray(editor)) {
+        editor = editors.at(i);
+      } else if (isFormGroup(editor)) {
+        editor = castFormArray(editor.get('children')).at(i);
+      }
+    }
+
+    if (isFormArray(editor)) {
+      editor.removeAt(key);
+    } else if (isFormGroup(editor)) {
+      const children = castFormArray(editor.get('children'));
+      children.removeAt(key);
+      if (children.length === 0) {
+        castFormControl(editor.get('value')).setValue('');
+      }
+    }
 
     return {
       ...state,
@@ -243,13 +287,11 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
 
     const editors = childEditors[refUrl];
     if (editors?.length) {
-      for (const editor of walkAbstractControl({ control: editors })) {
+      for (const editor of walkAbstractControl({ control: editors, level })) {
         yield {
-          type: NodeType.EDITOR,
+          ...editor,
           ref: snapshot.ref,
-          formControl: editor,
-          level: level + 1,
-          isExpandable: false,
+          level: level + editor.path.length,
         };
       }
 
@@ -284,25 +326,124 @@ function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTre
 
 interface WalkAbstractControl {
   control: AbstractControl;
+  path?: number[];
+  level?: number;
 }
 
-function isArrayGroup(control: AbstractControl): control is FormArray {
-  return control.hasOwnProperty('controls') && Array.isArray(control.value);
+// Check if FormGroup<{key: FormControl, value: FormControl, children: FormArray}>
+function isEditorContols(control: AbstractControl): control is any {
+  return true;
 }
 
-function isFormControl(control: AbstractControl): control is FormControl {
-  return !control.hasOwnProperty('controls');
+function isChildEditor(controls?: AbstractControl[]): controls is [FormControl, FormArray] {
+  return controls?.length === 2 && isFormControl(controls[0]) && isFormArray(controls[1]);
 }
 
-function* walkAbstractControl({ control }: WalkAbstractControl): Generator<FormControl, void, void> {
-  if (isArrayGroup(control)) {
-    for (const c of control.controls) {
-      yield* walkAbstractControl({ control: c });
+function isLeafEditor(controls?: AbstractControl[]): controls is FormControl[] {
+  return !!controls?.every(c => isFormControl(c));
+}
+
+
+function isFormArray(control?: AbstractControl | null): control is FormArray {
+  return !!control && control.hasOwnProperty('controls') && Array.isArray(control.value);
+}
+
+function isFormGroup(control?: AbstractControl): control is FormGroup {
+  return !!control && control.hasOwnProperty('controls') && !Array.isArray(control.value);
+}
+
+function assertFormArray(control?: AbstractControl | null): asserts control is FormArray {
+  if (!isFormArray(control)) {
+    throw new Error('control is not a FormArray');
+  }
+}
+
+function castFormArray(control?: AbstractControl | null): FormArray {
+  assertFormArray(control);
+  return control;
+}
+
+function isFormControl(control?: AbstractControl | null): control is FormControl {
+  return !!control && !control.hasOwnProperty('controls');
+}
+
+function assertFormControl(control?: AbstractControl | null): asserts control is FormControl {
+  if (!isFormControl(control)) {
+    throw new Error('control is not a FormControl');
+  }
+}
+
+function castFormControl(control?: AbstractControl | null): FormControl {
+  assertFormControl(control);
+  return control;
+}
+
+function assertKeyValueControlsTwo(controls: AbstractControl[]): asserts controls is [FormControl, FormArray] {
+  if (controls.length !== 2) {
+    throw new Error('length not two');
+  }
+  if (!isFormControl(controls[0])) {
+    throw new Error('key control is not a form-control');
+  }
+  if (!isFormArray(controls[1])) {
+    throw new Error('value control is not a form-array');
+  }
+}
+
+function isKeyValueControls(controls: AbstractControl[]): controls is [FormControl, FormArray] | [FormControl, FormArray] {
+  return (controls.length === 2 && isFormControl(controls[0]) && (isFormControl(controls[1]) || isFormArray(controls[1])));
+}
+
+function assertKeyValueControls(controls: AbstractControl[]): asserts controls is [FormControl, FormArray] {
+  if (controls.length !== 2) {
+    throw new Error('nah');
+  }
+  if (!isFormControl(controls[0])) {
+    throw new Error('key control is not a formcontrol');
+  }
+  if (!isFormControl(controls[1]) && !isFormArray(controls[1])) {
+    throw new Error('value control is not a form control or form array');
+  }
+}
+
+/**
+ * Controls:
+ * 
+ * Array<Key, Values> where:
+ *    Key: can be null (root node) or a FormControl<string>
+ *    Values: FormArray of either: <Key, Values> OR <FormControl>
+ * 
+ * 
+ */
+function* walkAbstractControl({ control, path = [], level = 0 }: WalkAbstractControl): Generator<EditorNode, void, void> {
+  if (isFormArray(control)) {
+    for (const [index, childControl] of control.controls.entries()) {
+      yield* walkAbstractControl({ control: childControl, path: [...path, index], level: level + 1 });
     }
-  } else if (isFormControl(control)) {
-    yield control;
-  } else {
-    throw new Error(`walk abstract control does not support FormGroup: ${control}`);
+  } else if (isFormGroup(control)) {
+    const keyControl = castFormControl(control.get('key'));
+    const valueControl = castFormControl(control.get('value'));
+    const childrenControl = castFormArray(control.get('children'));
+
+    if (valueControl.value === null) {
+      yield {
+        type: NodeType.EDITOR,
+        keyControl,
+        isExpandable: false,
+        path,
+      };
+
+      yield* walkAbstractControl({ control: childrenControl, path });
+    } else {
+      yield {
+        type: NodeType.EDITOR,
+        keyControl,
+        valueControl,
+        isExpandable: false,
+        path,
+      };
+
+    }
   }
 }
 

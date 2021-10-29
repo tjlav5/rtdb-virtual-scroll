@@ -75,7 +75,7 @@ export class RtdbViewerToggleComponent {
 
         <ng-container [ngSwitch]="item.type">
           <rtdb-realtime-node *ngSwitchCase="NodeType.REALTIME" [ref]="item.ref" [value]="item.value"></rtdb-realtime-node>
-          <rtdb-editor-node *ngSwitchCase="NodeType.EDITOR" [ref]="item.ref" [control]="item.formControl"></rtdb-editor-node>
+          <rtdb-editor-node *ngSwitchCase="NodeType.EDITOR" [ref]="item.ref" [keyControl]="item.keyControl" [valueControl]="item.valueControl" [path]="item.path"></rtdb-editor-node>
           <rtdb-save-node *ngSwitchCase="NodeType.SAVE" [ref]="item.ref" [control]="item.formControl"></rtdb-save-node>
         </ng-container>
       </div>

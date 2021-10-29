@@ -25,7 +25,13 @@ export class RtdbRealtimeNodeComponent {
 @Component({
     selector: 'rtdb-editor-node',
     template: `
-        <span>{{ ref?.toString() }} <input *ngIf="control" [formControl]="control"></span><button (click)="remove()">x</button>
+        <span>p:{{ path }}</span>
+        <span>--</span>
+        <span>r:{{ ref?.toString() }}</span>
+        <input *ngIf="keyControl" [formControl]="keyControl" placeholder="key" />
+        <input *ngIf="valueControl" [formControl]="valueControl" placeholder="value" />
+        <button (click)="remove()">x</button>
+        <button *ngIf="!valueControl || valueControl.value === ''" (click)="addChild()">+</button>
     `,
     styles: [`
         :host {
@@ -36,13 +42,95 @@ export class RtdbRealtimeNodeComponent {
 })
 export class RtdbEditorNodeComponent {
     @Input() ref?: DatabaseReference;
-    @Input() control?: FormControl;
+    @Input() keyControl?: FormControl;
+    @Input() valueControl?: FormControl;
+    @Input() path?: number[];
 
-    // TODO: this doesn't work; as crazy as it sounds, we need to walk the whole tree again on deletion, which means triggering store changes
     remove() {
-        if (this.ref && this.control && this.control.parent) {
-            // (this.control.parent as FormArray).removeAt(0);
-            this.store.removeChildEditor({ref: this.ref, control: this.control});
+        if (this.ref && this.path) {
+            this.store.removeChildEditor({ref: this.ref, path: this.path});
+        }
+    }
+
+    addChild() {
+        if (this.ref && this.path) {
+            this.store.addChildEditor({ref: this.ref, path: this.path});
+        }
+    }
+
+    constructor(readonly store: RtdbViewerStore) { }
+}
+
+@Component({
+    selector: 'rtdb-editor-leaf-node',
+    template: `
+        <span>p:{{ path }}</span>
+        <span>--</span>
+        <span>r:{{ ref?.toString() }}</span>
+        <input *ngIf="keyControl" [formControl]="keyControl" placeholder="key" />
+        <input *ngIf="valueControl" [formControl]="valueControl" placeholder="value" />
+        <button (click)="remove()">x</button>
+        <button (click)="addChild()">+</button>
+    `,
+    styles: [`
+        :host {
+            display: block;
+        } 
+    `],
+    changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class RtdbEditorLeafNodeComponent {
+    @Input() ref?: DatabaseReference;
+    @Input() keyControl?: FormControl;
+    @Input() valueControl?: FormControl;
+    @Input() path?: number[];
+
+    remove() {
+        if (this.ref && this.path) {
+            this.store.removeChildEditor({ref: this.ref, path: this.path});
+        }
+    }
+
+    addChild() {
+        if (this.ref && this.path) {
+            this.store.addChildEditor({ref: this.ref, path: this.path});
+        }
+    }
+
+    constructor(readonly store: RtdbViewerStore) { }
+}
+
+@Component({
+    selector: 'rtdb-editor-child-node',
+    template: `
+        <span>p:{{ path }}</span>
+        <span>with child...</span>
+        <span>r:{{ ref?.toString() }}</span>
+        <input *ngIf="keyControl" [formControl]="keyControl" placeholder="key" />
+        <button (click)="remove()">x</button>
+        <button (click)="addChild()">+</button>
+    `,
+    styles: [`
+        :host {
+            display: block;
+        } 
+    `],
+    changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class RtdbEditorChildNodeComponent {
+    @Input() ref?: DatabaseReference;
+    @Input() keyControl?: FormControl;
+    @Input() path?: number[];
+
+    remove() {
+        if (this.ref && this.path) {
+            this.store.removeChildEditor({ref: this.ref, path: this.path});
+        }
+    }
+
+    addChild() {
+        if (this.ref && this.path) {
+            this.store.addChildEditor({ref: this.ref, path: this.path});
         }
     }
 
