@@ -1,13 +1,21 @@
 import { ChangeDetectionStrategy, Component, Input } from "@angular/core";
 import { AbstractControl, FormArray, FormControl } from "@angular/forms";
-import { DatabaseReference } from "@firebase/database";
+import { DatabaseReference, DataSnapshot } from "@firebase/database";
+import { ReplaySubject } from "rxjs";
 import { JsonPrimitive, RtdbViewerStore } from "./rtdb-viewer.store";
 
 @Component({
     selector: 'rtdb-realtime-node',
     template: `
-        <span>{{ ref?.toString() }} {{ value }}</span>
-        <button *ngIf="ref && value === null" (click)="store.addChildEditor(ref)">Add child</button>`,
+        <span>{{ refPath || '_root_' }}</span>
+        &nbsp;
+        <ng-container *ngIf="value$ | async as value; else addChild">
+            <span>{{ value.val }}</span>
+        </ng-container>
+        <ng-template #addChild>
+            <button *ngIf="refPath" (click)="store.addChildEditor({refPath})">Add child</button>
+        </ng-template>
+    `,
     styles: [`
         :host {
             display: block;
@@ -16,8 +24,17 @@ import { JsonPrimitive, RtdbViewerStore } from "./rtdb-viewer.store";
     changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RtdbRealtimeNodeComponent {
-    @Input() ref?: DatabaseReference;
-    @Input() value?: JsonPrimitive;
+    @Input() refPath?: string;
+    @Input()
+    set snapshot(snapshot: DataSnapshot|null) {
+        if (snapshot?.exists() ) {
+            this.value$.next({val: snapshot.val()});
+        } else {
+            this.value$.next(null);
+        }
+    }
+    readonly value$ = new ReplaySubject<{val: JsonPrimitive}|null>(1);
+
 
     constructor(readonly store: RtdbViewerStore) { }
 }
@@ -27,7 +44,7 @@ export class RtdbRealtimeNodeComponent {
     template: `
         <span>p:{{ path }}</span>
         <span>--</span>
-        <span>r:{{ ref?.toString() }}</span>
+        <span>r:{{ refPath }}</span>
         <input *ngIf="keyControl" [formControl]="keyControl" placeholder="key" />
         <input *ngIf="valueControl" [formControl]="valueControl" placeholder="value" />
         <button (click)="remove()">x</button>
@@ -41,20 +58,20 @@ export class RtdbRealtimeNodeComponent {
     changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RtdbEditorNodeComponent {
-    @Input() ref?: DatabaseReference;
+    @Input() refPath?: string;
     @Input() keyControl?: FormControl;
     @Input() valueControl?: FormControl;
     @Input() path?: number[];
 
     remove() {
-        if (this.ref && this.path) {
-            this.store.removeChildEditor({ref: this.ref, path: this.path});
+        if (this.refPath && this.path) {
+            this.store.removeChildEditor({refPath: this.refPath, path: this.path});
         }
     }
 
     addChild() {
-        if (this.ref && this.path) {
-            this.store.addChildEditor({ref: this.ref, path: this.path});
+        if (this.refPath && this.path) {
+            this.store.addChildEditor({refPath: this.refPath, path: this.path});
         }
     }
 
@@ -74,7 +91,7 @@ export class RtdbEditorNodeComponent {
     changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RtdbSaveNodeComponent {
-    @Input() ref?: DatabaseReference;
+    @Input() refPath?: string;
     @Input() control?: FormArray;
 
     constructor(readonly store: RtdbViewerStore) { }

@@ -40,7 +40,8 @@ export enum NodeType {
 
 interface RealtimeNode {
   type: NodeType.REALTIME;
-  value: JsonPrimitive;
+  // value: JsonPrimitive;
+  snapshot: DataSnapshot | null;
   isExpandable: boolean;
 }
 
@@ -63,13 +64,17 @@ interface RestNode {
   isExpandable: boolean;
 }
 
-export type RtdbNode = { type: NodeType, ref: DatabaseReference, level: number, } & (RealtimeNode | EditorNode | SaveNode | RestNode);
+export type RtdbNode = { type: NodeType, refPath: string, level: number, } & (RealtimeNode | EditorNode | SaveNode | RestNode);
 
 let walkAbstractControlPerformance = 0;
 let retToStringPerfomance = 0;
 let childrenForEachPerformance = 0;
 let childrenWalkTreePerformance = 0;
 let snapshotValPerformance = 0;
+
+export function relativeRefPath(ref: DatabaseReference, rootRef: DatabaseReference): string {
+  return ref.toString().replace(rootRef.toString(), '/');
+}
 
 
 @Injectable()
@@ -98,9 +103,9 @@ export class RtdbViewerStore
     query,
   }));
 
-  readonly expandNode = this.updater((state, ref: DatabaseReference) => {
+  readonly expandNode = this.updater((state, refPath: string) => {
     const collapsedRefs = new Set(state.collapsedRefs);
-    collapsedRefs.delete(ref.toString());
+    collapsedRefs.delete(refPath);
 
     return {
       ...state,
@@ -108,14 +113,13 @@ export class RtdbViewerStore
     };
   });
 
-  readonly collapseNode = this.updater((state, ref: DatabaseReference) => ({
+  readonly collapseNode = this.updater((state, refPath: string) => ({
     ...state,
-    collapsedRefs: new Set([...state.collapsedRefs, ref.toString()]),
+    collapsedRefs: new Set([...state.collapsedRefs, refPath]),
   }));
 
-  readonly addChildEditor = this.updater((state, { ref, path = [] }: { ref: DatabaseReference, path?: number[] }) => {
-    const refURL = ref.toString();
-    let editors = state.childEditors[refURL] ?? new FormArray([]);
+  readonly addChildEditor = this.updater((state, { refPath, path = [] }: { refPath: string, path?: number[] }) => {
+    let editors = state.childEditors[refPath] ?? new FormArray([]);
 
     console.log({ editors });
 
@@ -141,14 +145,13 @@ export class RtdbViewerStore
       ...state,
       childEditors: {
         ...state.childEditors,
-        [refURL]: editors,
+        [refPath]: editors,
       },
     };
   });
 
-  readonly removeChildEditor = this.updater((state, { ref, path }: { ref: DatabaseReference, path: number[] }) => {
-    const refURL = ref.toString();
-    const editors = state.childEditors[refURL];
+  readonly removeChildEditor = this.updater((state, { refPath, path }: { refPath: string, path: number[] }) => {
+    const editors = state.childEditors[refPath];
 
     if (!editors) {
       return state;
@@ -182,7 +185,7 @@ export class RtdbViewerStore
       ...state,
       childEditors: {
         ...state.childEditors,
-        [refURL]: editors,
+        [refPath]: editors,
       },
     };
   });
@@ -253,13 +256,11 @@ export class RtdbViewerStore
 
   readonly uber$ = combineLatest([this.rootRef$, this.object$, this.collapsedRefs$, this.childEditors$,]).pipe(map(([rootRef, { snapshot }, collapsedRefs, childEditors,]) => {
     console.log({ snapshot, collapsedRefs, childEditors });
+    (window as any).snapshot = snapshot;
 
     const t0 = performance.now();
-    const snapshots = walkTree({ snapshot, collapsedRefs, childEditors });
-    const uber: RtdbNode[] = [];
-    for (const s of snapshots) {
-      uber.push(s);
-    }
+    // const uber = [...walkTree({ snapshot, collapsedRefs, childEditors })];
+    const uber = walkTreeRecurseMutate({ snapshot, collapsedRefs, childEditors });
     const t1 = performance.now();
     console.log({ uber, time: t1 - t0 });
     return uber;
@@ -272,6 +273,60 @@ export class RtdbViewerStore
   disconnect() { }
 }
 
+function walkTreeRecurseMutate({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTree): RtdbNode[] {
+  (console as any).profile('walkTree');
+  const nodes: RtdbNode[] = [];
+
+  function foo({ snapshot, level, refPath}: { snapshot: DataSnapshot, level: number, refPath: string }) {
+    if (snapshot.hasChildren()) {
+      nodes.push({
+        type: NodeType.REALTIME,
+        refPath,
+        snapshot: null,
+        level,
+        isExpandable: true,
+      });
+
+      const editor = childEditors[refPath];
+      if (editor?.length) {
+        for (const e of walkAbstractControl({ control: editor, level })) {
+          nodes.push({
+            ...e,
+            refPath,
+            level: level + e.path.length,
+          });
+        }
+
+        nodes.push({
+          type: NodeType.SAVE,
+          refPath,
+          level: level + 1,
+          isExpandable: false,
+          formControl: editor,
+        });
+      }
+
+      if (!collapsedRefs.has(refPath)) {
+        snapshot.forEach(childSnapshot => {
+          foo({ snapshot: childSnapshot, level: level + 1, refPath: `${refPath}/${childSnapshot.key}` });
+        });
+      }
+    } else {
+      nodes.push({
+        type: NodeType.REALTIME,
+        refPath,
+        snapshot: snapshot,
+        level,
+        isExpandable: false,
+      });
+    }
+  }
+
+  foo({ snapshot, level, refPath: snapshot.key ?? '/' });
+  (console as any).profileEnd('walkTree');
+  return nodes;
+}
+
 interface WalkTree {
   snapshot: DataSnapshot;
   collapsedRefs: Set<string>;
@@ -279,57 +334,59 @@ interface WalkTree {
   level?: number;
 }
 
-function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTree): Generator<RtdbNode, void, void> {
-
-  if (snapshot.hasChildren()) {
-    yield {
-      type: NodeType.REALTIME,
-      ref: snapshot.ref,
-      value: null,
-      level,
-      isExpandable: true,
-    }
-
-    const refUrl = snapshot.ref.toString();
-
-    const editors = childEditors[refUrl];
-    if (editors?.length) {
-      for (const editor of walkAbstractControl({ control: editors, level })) {
-        yield {
-          ...editor,
-          ref: snapshot.ref,
-          level: level + editor.path.length,
-        };
-      }
-
-      yield {
-        type: NodeType.SAVE,
-        ref: snapshot.ref,
-        level: level + 1,
-        isExpandable: false,
-        formControl: editors,
-      };
-    }
-
-    if (!collapsedRefs.has(refUrl)) {
-      const children: DataSnapshot[] = [];
-      snapshot.forEach(c => {
-        children.push(c);
-      });
-      for (const child of children) {
-        yield* walkTree({ snapshot: child, collapsedRefs, childEditors, level: level + 1, });
-      }
-    }
-  } else {
-    yield {
-      type: NodeType.REALTIME,
-      ref: snapshot.ref,
-      value: snapshot.val(),
-      level: level,
-      isExpandable: false,
-    }
-  }
-}
+// function* walkTree({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTree): Generator<RtdbNode, void, void> {
+// 
+//   if (snapshot.hasChildren()) {
+//     yield {
+//       type: NodeType.REALTIME,
+//       ref: snapshot.ref,
+//       // value: null,
+//       snapshot: null,
+//       level,
+//       isExpandable: true,
+//     }
+// 
+//     const refUrl = snapshot.ref.toString();
+// 
+//     const editors = childEditors[refUrl];
+//     if (editors?.length) {
+//       for (const editor of walkAbstractControl({ control: editors, level })) {
+//         yield {
+//           ...editor,
+//           ref: snapshot.ref,
+//           level: level + editor.path.length,
+//         };
+//       }
+// 
+//       yield {
+//         type: NodeType.SAVE,
+//         ref: snapshot.ref,
+//         level: level + 1,
+//         isExpandable: false,
+//         formControl: editors,
+//       };
+//     }
+// 
+//     if (!collapsedRefs.has(refUrl)) {
+//       const children: DataSnapshot[] = [];
+//       snapshot.forEach(c => {
+//         children.push(c);
+//       });
+//       for (const child of children) {
+//         yield* walkTree({ snapshot: child, collapsedRefs, childEditors, level: level + 1, });
+//       }
+//     }
+//   } else {
+//     yield {
+//       type: NodeType.REALTIME,
+//       ref: snapshot.ref,
+//       snapshot,
+//       // value: snapshot.val(),
+//       level: level,
+//       isExpandable: false,
+//     }
+//   }
+// }
 
 interface WalkAbstractControl {
   control: AbstractControl;
