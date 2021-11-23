@@ -19,6 +19,7 @@ interface Toggle {
   refPath: string; 
 }
 
+/** @deprecated Use toggle in rtdb/rest-nodes; they behave very differently */
 @Component({
   selector: 'rtdb-viewer-toggle',
   template: `
@@ -71,10 +72,9 @@ export class RtdbViewerToggleComponent {
         [@.disabled]="isScrolling"
         [@rtdbAddRemove]
       >
-        <rtdb-viewer-toggle [canToggle]="item.isExpandable" [refPath]="item.refPath"></rtdb-viewer-toggle>
-
         <ng-container [ngSwitch]="item.type">
-          <rtdb-realtime-node *ngSwitchCase="NodeType.REALTIME" [refPath]="item.refPath" [snapshot]="item.snapshot"></rtdb-realtime-node>
+          <rtdb-realtime-node *ngSwitchCase="NodeType.REALTIME" [refPath]="item.refPath" [snapshot]="item.snapshot" [isExpandable]="item.isExpandable"></rtdb-realtime-node>
+          <rtdb-rest-node *ngSwitchCase="NodeType.REST" [refPath]="item.refPath" [value]="item.value" [isExpandable]="item.isExpandable"></rtdb-rest-node>
           <rtdb-editor-node *ngSwitchCase="NodeType.EDITOR" [refPath]="item.refPath" [keyControl]="item.keyControl" [valueControl]="item.valueControl" [path]="item.path"></rtdb-editor-node>
           <rtdb-save-node *ngSwitchCase="NodeType.SAVE" [refPath]="item.refPath" [control]="item.formControl"></rtdb-save-node>
         </ng-container>

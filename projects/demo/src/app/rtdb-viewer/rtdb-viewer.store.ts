@@ -1,18 +1,22 @@
 import { DataSource } from '@angular/cdk/collections/data-source';
 import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { DatabaseReference, DataSnapshot, refFromURL } from '@firebase/database';
-import { ComponentStore } from '@ngrx/component-store';
-import { combineLatest, EMPTY, of } from 'rxjs';
-import { catchError, concatMap, map, shareReplay, switchMap, tap } from 'rxjs/operators';
-import { object } from 'rxfire/database';
+import { ComponentStore, tapResponse } from '@ngrx/component-store';
+import { combineLatest, EMPTY, Observable, of, throwError } from 'rxjs';
+import { catchError, concatMap, map, shareReplay, switchMap, switchMapTo, tap, withLatestFrom } from 'rxjs/operators';
+import { object, QueryChange } from 'rxfire/database';
 import { AbstractControl, FormArray, FormControl, FormGroup, NgControlStatus } from '@angular/forms';
 import { assert } from '@firebase/util';
+import { registerLocaleData } from '@angular/common';
 
 interface State {
   rootRef: DatabaseReference | undefined;
   query: string | undefined;
   collapsedRefs: Set<string>;
   childEditors: Record<string, FormArray>;
+  dataSnapshot: DataSnapshot | null;
+  restData: { [ref: string]: Json } | null;
 }
 
 const INITIAL_STATE: State = {
@@ -20,6 +24,8 @@ const INITIAL_STATE: State = {
   query: undefined,
   collapsedRefs: new Set(),
   childEditors: {},
+  dataSnapshot: null,
+  restData: null,
 }
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -61,6 +67,7 @@ interface SaveNode {
 
 interface RestNode {
   type: NodeType.REST;
+  value: Json;
   isExpandable: boolean;
 }
 
@@ -82,18 +89,37 @@ export class RtdbViewerStore
   extends ComponentStore<State>
   implements DataSource<RtdbNode>
 {
-  constructor() {
+  constructor(private readonly httpClient: HttpClient) {
     super(INITIAL_STATE);
+
+    this.effect(hydrate$ => this.rootRef$.pipe(
+      switchMap(rootRef => {
+        if (!rootRef) return EMPTY;
+
+        return object(rootRef).pipe(
+          concatMap(() => {
+            return throwError(() => 'nah!');
+          }),
+          tapResponse(
+            ({ snapshot }) => this.patchState({ dataSnapshot: snapshot }),
+            () => this.fetchData({ ref: '' }),
+          ));
+      }),
+    ));
   }
 
   readonly rootRef$ = this.select(state => state.rootRef);
   readonly query$ = this.select(state => state.query);
+  readonly dataSnapshot$ = this.select(state => state.dataSnapshot);
+  readonly restData$ = this.select(state => state.restData);
   readonly collapsedRefs$ = this.select(state => state.collapsedRefs);
   readonly childEditors$ = this.select(state => state.childEditors);
 
   readonly setRootRef = this.updater((state, rootRef: DatabaseReference | undefined) => ({
     ...state,
     rootRef,
+    dataSnapshot: null,
+    restData: null,
     collapsedRefs: new Set(),
     childEditors: {},
   }));
@@ -107,16 +133,22 @@ export class RtdbViewerStore
     const collapsedRefs = new Set(state.collapsedRefs);
     collapsedRefs.delete(refPath);
 
+    console.log('expand', { refPath });
+
     return {
       ...state,
       collapsedRefs,
     };
   });
 
-  readonly collapseNode = this.updater((state, refPath: string) => ({
-    ...state,
-    collapsedRefs: new Set([...state.collapsedRefs, refPath]),
-  }));
+  readonly collapseNode = this.updater((state, refPath: string) => {
+    console.log('collapse', { refPath });
+
+    return {
+      ...state,
+      collapsedRefs: new Set([...state.collapsedRefs, refPath]),
+    };
+  });
 
   readonly addChildEditor = this.updater((state, { refPath, path = [] }: { refPath: string, path?: number[] }) => {
     let editors = state.childEditors[refPath] ?? new FormArray([]);
@@ -200,22 +232,6 @@ export class RtdbViewerStore
         return object(ref).pipe(
           map(({ snapshot }) => {
             return [];
-            // console.log({ ref, collapsedRefs, data: snapshot.val() });
-            // const t0 = performance.now();
-            // const flatSnapshot = flattenSnapshot(snapshot, collapsedRefs);
-            // const t1 = performance.now();
-            // console.log({ flatSnapshot, time: t1 - t0 })
-
-            // const t0b = performance.now();
-            // const snapshots = walkTree(snapshot, collapsedRefs, childEditors);
-            // const x = [];
-            // for (const s of snapshots) {
-            //   x.push(s);
-            // }
-            // const t1b = performance.now();
-            // console.log({ uber: x, time: t1b - t0b })
-
-            // return flatSnapshot;
           }));
       }),
       catchError((err, caught) => {
@@ -230,22 +246,6 @@ export class RtdbViewerStore
   readonly queryResults$ = combineLatest([this.flatSnapshot$, this.query$]).pipe(
     map(([flatSnapshot, query]) => {
       return [];
-      // const t0 = performance.now();
-      // if (!query) {
-      //   return [];
-      // }
-
-      // const indicies: number[] = [];
-      // for (let i = 0; i < flatSnapshot.length; i++) {
-      //   const [ref, val] = flatSnapshot[i];
-      //   if (ref.toString().includes(query) || val.toString().includes(query)) {
-      //     indicies.push(i);
-      //   }
-      // }
-      // const t1 = performance.now();
-      // console.log({ queryResultsCount: indicies.length, time: t1 - t0 })
-
-      // return indicies;
     }),
   );
 
@@ -254,30 +254,105 @@ export class RtdbViewerStore
     shareReplay({ bufferSize: 1, refCount: true }),
   )
 
-  readonly uber$ = combineLatest([this.rootRef$, this.object$, this.collapsedRefs$, this.childEditors$,]).pipe(map(([rootRef, { snapshot }, collapsedRefs, childEditors,]) => {
-    console.log({ snapshot, collapsedRefs, childEditors });
-    (window as any).snapshot = snapshot;
+  readonly object2$ = this.select(this.rootRef$.pipe(
+    switchMap(ref => ref ? object(ref) : EMPTY),
+    // tap(() => this.fetchData({ref: ''})),
+  ), dataSnapshot => dataSnapshot);
 
-    const t0 = performance.now();
-    // const uber = [...walkTree({ snapshot, collapsedRefs, childEditors })];
-    const uber = walkTreeRecurseMutate({ snapshot, collapsedRefs, childEditors });
-    const t1 = performance.now();
-    console.log({ uber, time: t1 - t0 });
-    return uber;
-  }));
+  readonly uber$: Observable<RtdbNode[]> = this.select(this.rootRef$, this.dataSnapshot$, this.collapsedRefs$, this.childEditors$, this.restData$, (rootRef, snapshot, collapsedRefs, childEditors, restData) => {
+    if (!snapshot && !restData) {
+      return [];
+    }
+
+    if (snapshot) {
+      console.log({ snapshot, collapsedRefs, childEditors });
+      (window as any).snapshot = snapshot;
+
+      const t0 = performance.now();
+      // const uber = [...walkTree({ snapshot, collapsedRefs, childEditors })];
+      const uber = walkTreeRecurseMutate({ snapshot, collapsedRefs, childEditors });
+      const t1 = performance.now();
+      console.log({ uber, time: t1 - t0 });
+      return uber;
+    } else {
+      console.log({ restData });
+      const t0 = performance.now();
+      const uber = walkRestTreeRecurseMutate({ restData: restData!['']!, allRestData: restData ?? {}, collapsedRefs });
+      const t1 = performance.now();
+      console.log({ uber, time: t1 - t0 });
+      return uber;
+    }
+  });
 
   connect() {
     return this.uber$;
   }
 
   disconnect() { }
+
+  readonly fetchData = this.effect<{ ref: string }>(fetch$ => fetch$.pipe(
+    withLatestFrom(this.rootRef$),
+    concatMap(([{ ref }, rootRef]) => {
+      if (!rootRef) return EMPTY;
+
+      // TODO: urlencode the ref + handle root-ref case
+      return this.httpClient.get<Json>(`${rootRef.toString()}/${ref}.json?shallow=true&r=f`).pipe(
+        tapResponse(
+          (data) => this.patchState(state => ({ ...state, restData: { ...state.restData, [ref]: data }, })),
+          (error) => { },
+        ),
+      );
+    }),
+  ));
+}
+
+interface WalkRestTree {
+  restData: Json,
+  allRestData: Json,
+  collapsedRefs: Set<string>;
+  level?: number;
+}
+
+function walkRestTreeRecurseMutate({ restData, allRestData, collapsedRefs, level = 0 }: WalkRestTree): RtdbNode[] {
+  const nodes: RtdbNode[] = [];
+
+  function foo({ restData, level, refPath }: { restData: Json, level: number, refPath: string }) {
+    console.log({ restData, allRestData, refPath });
+    if (restData instanceof Object) {
+      nodes.push({
+        type: NodeType.REST,
+        value: null,
+        isExpandable: true,
+        refPath,
+        level,
+      });
+
+      if (!collapsedRefs.has(refPath)) {
+        for (const [key, value] of Object.entries(restData)) {
+          foo({ restData: allRestData![`${refPath}/${key}`] ?? value, level: level + 1, refPath: `${refPath}/${key}` });
+        }
+      }
+    }
+    else {
+      nodes.push({
+        type: NodeType.REST,
+        value: allRestData![refPath] ?? restData,
+        isExpandable: restData === true && !allRestData![refPath],
+        refPath,
+        level,
+      });
+    }
+  }
+
+  foo({ restData, level, refPath: '' });
+  return nodes;
 }
 
 function walkTreeRecurseMutate({ snapshot, collapsedRefs, childEditors, level = 0 }: WalkTree): RtdbNode[] {
-  (console as any).profile('walkTree');
+  // (console as any).profile('walkTree');
   const nodes: RtdbNode[] = [];
 
-  function foo({ snapshot, level, refPath}: { snapshot: DataSnapshot, level: number, refPath: string }) {
+  function foo({ snapshot, level, refPath }: { snapshot: DataSnapshot, level: number, refPath: string }) {
     if (snapshot.hasChildren()) {
       nodes.push({
         type: NodeType.REALTIME,
@@ -323,7 +398,7 @@ function walkTreeRecurseMutate({ snapshot, collapsedRefs, childEditors, level = 
   }
 
   foo({ snapshot, level, refPath: snapshot.key ?? '/' });
-  (console as any).profileEnd('walkTree');
+  // (console as any).profileEnd('walkTree');
   return nodes;
 }
 
